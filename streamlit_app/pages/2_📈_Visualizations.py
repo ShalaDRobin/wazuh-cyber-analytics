@@ -22,11 +22,15 @@ with st.sidebar:
     st.header("🔧 Filtres")
     
     # Filtrer par date si disponible
-    if 'timestamp' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    if 'timestamp' in df.columns or '@timestamp' in df.columns:
+        # Utiliser @timestamp en priorité, sinon timestamp
+        time_column = '@timestamp' if '@timestamp' in df.columns else 'timestamp'
+        
+        # S'assurer que la colonne est en datetime
+        df[time_column] = pd.to_datetime(df[time_column], errors='coerce')
         
         # Vérifier si on a des dates valides
-        valid_dates = df['timestamp'].dropna()
+        valid_dates = df[time_column].dropna()
         if len(valid_dates) > 0:
             min_date = valid_dates.min().date()
             max_date = valid_dates.max().date()
@@ -40,21 +44,38 @@ with st.sidebar:
             
             if len(date_range) == 2:
                 start_date, end_date = date_range
-                df = df[(df['timestamp'] >= pd.Timestamp(start_date)) & 
-                       (df['timestamp'] <= pd.Timestamp(end_date))]
+                # Convertir les dates en datetime avec fuseau UTC
+                start_dt = pd.to_datetime(start_date).tz_localize('UTC')
+                # Ajouter un jour à la fin pour inclure toute la journée
+                end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+                end_dt = end_dt.tz_localize('UTC')
+                
+                df = df[(df[time_column] >= start_dt) & 
+                       (df[time_column] < end_dt)]
     
     # Filtrer par IP source
-    if 'agent' in df.columns and 'ip' in df.get('agent', {}).iloc[0] if len(df) > 0 else False:
-        # Extraire les IPs depuis agent.ip
+    if 'agent' in df.columns and len(df) > 0:
         try:
-            df['source_ip'] = df['agent'].apply(lambda x: x.get('ip', 'unknown') if isinstance(x, dict) else 'unknown')
-            all_ips = ['Toutes'] + df['source_ip'].unique().tolist()
+            # Extraire les IPs depuis agent.ip
+            def extract_ip(agent_data):
+                try:
+                    if isinstance(agent_data, dict):
+                        return agent_data.get('ip', 'unknown')
+                    elif isinstance(agent_data, str):
+                        import json
+                        data = json.loads(agent_data)
+                        return data.get('ip', 'unknown')
+                except:
+                    return 'unknown'
+            
+            df['source_ip'] = df['agent'].apply(extract_ip)
+            all_ips = ['Toutes'] + sorted([ip for ip in df['source_ip'].unique() if ip != 'unknown'])
             selected_ip = st.selectbox("IP Source", all_ips)
             
             if selected_ip != 'Toutes':
                 df = df[df['source_ip'] == selected_ip]
-        except:
-            pass
+        except Exception as e:
+            st.warning(f"Impossible d'extraire les IPs : {e}")
     
     st.metric("Logs filtrés", len(df))
 
@@ -69,9 +90,10 @@ tab1, tab2, tab3, tab4 = st.tabs([
 with tab1:
     st.markdown("### ⏰ Analyse temporelle")
     
-    if 'timestamp' in df.columns and len(df) > 0:
+    time_column = '@timestamp' if '@timestamp' in df.columns else 'timestamp'
+    if time_column in df.columns and len(df) > 0:
         # Événements par heure
-        df['hour'] = df['timestamp'].dt.hour
+        df['hour'] = df[time_column].dt.hour
         events_per_hour = df['hour'].value_counts().sort_index()
         
         fig = px.line(
@@ -88,7 +110,7 @@ with tab1:
         
         with col1:
             # Par jour de la semaine
-            df['day_name'] = df['timestamp'].dt.day_name()
+            df['day_name'] = df[time_column].dt.day_name()
             day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 
                         'Friday', 'Saturday', 'Sunday']
             events_per_day = df['day_name'].value_counts().reindex(day_order, fill_value=0)
@@ -245,9 +267,13 @@ with tab4:
                 st.metric("🖥️ Agents uniques", "N/A")
     
     with col4:
-        if 'timestamp' in df.columns:
-            time_span = (df['timestamp'].max() - df['timestamp'].min()).days
-            st.metric("📅 Période (jours)", time_span)
+        time_column = '@timestamp' if '@timestamp' in df.columns else 'timestamp'
+        if time_column in df.columns:
+            try:
+                time_span = (df[time_column].max() - df[time_column].min()).days
+                st.metric("📅 Période (jours)", time_span)
+            except:
+                st.metric("📅 Période (jours)", "N/A")
     
     # Tableau récapitulatif
     st.markdown("### 📋 Résumé des colonnes")

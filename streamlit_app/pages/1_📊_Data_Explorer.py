@@ -4,6 +4,8 @@ import pandas as pd
 from utils.wazuh_connector import get_wazuh_connector
 from utils.data_processing import clean_dataframe, get_summary_stats
 import plotly.express as px
+from datetime import datetime
+
 
 st.set_page_config(page_title="Data Explorer", page_icon="📊", layout="wide")
 
@@ -39,13 +41,28 @@ if refresh or st.session_state.df.empty:
             st.error(f"❌ Erreur lors du chargement : {error}")
         elif not logs:
             st.warning("⚠️ Aucune donnée trouvée dans Wazuh")
-            st.info("💡 Assurez-vous que l'Étudiant 1 a injecté des logs dans Wazuh")
+            st.info("💡 Vérifiez que Wazuh fonctionne et contient des logs")
         else:
             # Convertir en DataFrame
             df = connector.logs_to_dataframe(logs)
+            
+            # Afficher un aperçu des données brutes
+            with st.expander("🔍 Voir les premières lignes brutes"):
+                if not df.empty:
+                    st.write("Première ligne :")
+                    st.json(logs[0] if logs else {})
+            
+            # Nettoyer les données
             df = clean_dataframe(df)
             st.session_state.df = df
+            
+            # Afficher un résumé avec l'heure actuelle
+            now = datetime.now()
             st.success(f"✅ {len(df)} logs chargés avec succès")
+            st.caption(f"🕐 Dernière mise à jour : {now.strftime('%Y-%m-%d à %H:%M:%S')}")
+            
+            # Afficher les colonnes disponibles
+            st.info(f"📋 Colonnes disponibles : {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
 # Afficher les données
 df = st.session_state.df
@@ -72,7 +89,27 @@ if not df.empty:
     
     # Plage de dates
     if stats['date_range']['start'] and stats['date_range']['end']:
-        st.info(f"📅 Période : {stats['date_range']['start']} à {stats['date_range']['end']}")
+        start = stats['date_range']['start']
+        end = stats['date_range']['end']
+        
+        # Formater pour être plus lisible
+        if hasattr(start, 'strftime'):
+            start_str = start.strftime('%d/%m/%Y %H:%M:%S')
+            end_str = end.strftime('%d/%m/%Y %H:%M:%S')
+            
+            # Calculer la durée
+            duration = end - start
+            hours = duration.total_seconds() / 3600
+            days = duration.days
+            
+            if days > 0:
+                duration_str = f"{days} jour{'s' if days > 1 else ''} et {hours % 24:.0f}h"
+            else:
+                duration_str = f"{hours:.1f} heures"
+            
+            st.info(f"📅 Période du dataset : du {start_str} au {end_str}\n\n⏱️ Durée couverte : {duration_str}")
+        else:
+            st.info(f"📅 Période : {start} à {end}")
     
     # Onglets
     tab1, tab2, tab3 = st.tabs(["📋 Tableau", "🔍 Colonnes", "📊 Aperçu"])
